@@ -74,4 +74,80 @@
     <div class="legal">&copy; {% now "Y" %} Alderwick Family Health. Alderwick Family Health is a fictional organization created for IS 4490 at the University of Utah. All people, records, and data on this site are synthetic.</div>
   </div>
 </footer>
+<style>
+  .ai-assistant { position: fixed; right: 1.25rem; bottom: 1.25rem; width: min(24rem, calc(100vw - 2rem)); z-index: 50; border: 1px solid #c7d8d4; border-radius: 1rem; overflow: hidden; box-shadow: 0 1rem 2.5rem rgba(18, 61, 57, .22); background: #fff; }
+  .ai-assistant__head { padding: .9rem 1rem; color: #fff; background: linear-gradient(135deg, #0d514c, #14716a); }
+  .ai-assistant__title { display: block; font-size: 1rem; letter-spacing: .01em; }
+  .ai-assistant__subtitle { display: block; margin-top: .15rem; color: #d9f2ee; font-size: .78rem; }
+  .ai-thread { max-height: 15.5rem; min-height: 8.5rem; overflow-y: auto; padding: 1rem; background: #f7fbfa; }
+  .ai-message { max-width: 88%; margin: 0 0 .65rem; padding: .65rem .75rem; border-radius: .8rem; color: #173c37; background: #e6f2ef; font-size: .9rem; line-height: 1.4; }
+  .ai-message--user { margin-left: auto; color: #fff; background: #176b64; }
+  .ai-message a { color: inherit; font-weight: 700; }
+  .ai-form { display: flex; gap: .5rem; padding: .75rem; border-top: 1px solid #dbe9e6; background: #fff; }
+  .ai-form input { flex: 1; min-width: 0; padding: .6rem .7rem; border: 1px solid #9cbdb7; border-radius: .5rem; }
+  .ai-form button { padding: .6rem .85rem; }
+  .ai-note { padding: 0 .85rem .75rem; color: #52726c; background: #fff; font-size: .72rem; line-height: 1.35; }
+  .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
+  @media (max-width: 600px) { .ai-assistant { right: 1rem; bottom: 1rem; } }
+</style>
+<aside class="ai-assistant" aria-label="Alderwick Assist">
+  <div class="ai-assistant__head">
+    <strong class="ai-assistant__title">✦ Alderwick Assist</strong>
+    <span class="ai-assistant__subtitle">Appointments &amp; care navigation</span>
+  </div>
+  <div id="ai-thread" class="ai-thread" role="log" aria-live="polite">
+    <p class="ai-message">Hi! I can answer clinic questions, guide you to a secure appointment request, show your upcoming appointments after sign-in, or help you find the cancellation page. I can’t provide medical advice or handle emergencies.</p>
+  </div>
+  <form id="ai-form" class="ai-form">
+    <label class="sr-only" for="ai-message">Ask Alderwick Assist</label>
+    <input id="ai-message" maxlength="800" placeholder="Ask about an appointment or clinic service" autocomplete="off" required>
+    <button class="btn" type="submit">Send</button>
+  </form>
+  <p class="ai-note">For medical emergencies, call 911. Please do not send private medical or insurance details in chat.</p>
+</aside>
+<script>
+(() => {
+  const form = document.getElementById('ai-form');
+  const input = document.getElementById('ai-message');
+  const thread = document.getElementById('ai-thread');
+  const addMessage = (text, user = false, link) => {
+    const message = document.createElement('p');
+    message.className = user ? 'ai-message ai-message--user' : 'ai-message';
+    message.textContent = text;
+    if (link && link.href) {
+      message.append(' ');
+      const anchor = document.createElement('a');
+      anchor.href = link.href;
+      anchor.textContent = link.label;
+      message.append(anchor);
+    }
+    thread.append(message);
+    thread.scrollTop = thread.scrollHeight;
+  };
+  form.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const text = input.value.trim();
+    if (!text) return;
+    addMessage(text, true);
+    input.value = '';
+    input.disabled = true;
+    try {
+      const response = await fetch('{% url "public:assistant_chat" %}', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-CSRFToken': '{{ csrf_token }}' },
+        body: JSON.stringify({ message: text })
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || 'Request failed');
+      const label = data.intent === 'cancel' ? 'Open my appointments →' : data.intent === 'appointment' ? 'Request an appointment →' : '';
+      addMessage(data.reply || 'I’m sorry, I couldn’t answer that.', false, label ? { href: data.appointment_url, label } : null);
+    } catch (error) {
+      addMessage('I’m having trouble connecting right now. You can still use the appointment request button above.', false);
+    } finally {
+      input.disabled = false;
+      input.focus();
+    }
+  });
+})();
+</script>
 {% endblock %}
