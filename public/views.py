@@ -166,3 +166,46 @@ def permission_denied(request, exception=None):
 
 def page_not_found(request, exception=None):
     return render(request, "404.html", status=404)
+
+
+def assistant_chat(request):
+    """Safe Q&A and appointment navigation; a patient can see only their own appointments."""
+    import json
+    from django.http import JsonResponse
+    from clinic import gemini
+    from clinic.models import Appointment
+
+    if request.method != "POST":
+        return JsonResponse({"error": "POST required"}, status=405)
+    try:
+        message = json.loads(request.body).get("message", "").strip()[:800]
+    except (ValueError, AttributeError):
+        message = ""
+    if not message:
+        return JsonResponse({"reply": "Tell me what you need help with.", "intent": "general"})
+
+    lower = message.lower()
+    is_patient = request.user.is_authenticated and getattr(request.user, "is_patient", False)
+    wants_list = any(word in lower for word in ("my appointment", "my upcoming", "show appointment"))
+    wants_cancel = any(word in lower for word in ("cancel", "reschedule", "change my"))
+    if is_patient and (wants_list or wants_cancel):
+        upcoming = request.user.patient.appointments.filter(start__gt=timezone.now(), status=Appointment.Status.SCHEDULED).select_related("provider", "office")[:5]
+        if not upcoming:
+            return JsonResponse({"reply": "You do not have upcoming appointments. Use the secure form to request one.", "intent": "appointment", "appointment_url": "/portal/appointments/request/"})
+        details = "; ".join(f"{a.start:%b %d at %I:%M %p} with {a.provider.display_name}" for a in upcoming)
+        if wants_cancel:
+            return JsonResponse({"reply": f"I found: {details}. Use the Cancel button on your appointments page. Visits within 24 hours must be changed by calling the clinic.", "intent": "cancel", "appointment_url": "/portal/appointments/"})
+        return JsonResponse({"reply": f"Your upcoming appointments: {details}.", "intent": "appointment", "appointment_url": "/portal/appointments/"})
+
+    specialties = "; ".join(Provider.objects.filter(is_active=True).values_list("specialty__name", flat=True).distinct())
+    system = ("You are Alderwick Assist. Give concise, friendly answers using only public Alderwick information. "
+              "You can answer questions about providers, locations, insurance, portal access, and appointment requests. "
+              "Never ask for medical details, dates of birth, insurance IDs, diagnoses, or other sensitive data. "
+              "For emergencies, tell the visitor to call 911. Never claim an appointment is booked, cancelled, or changed.")
+    try:
+        reply = gemini.generate_text(f"Visitor question: {message}\nAvailable specialties: {specialties}", system_instruction=system)
+    except gemini.GeminiError:
+        reply = "I can help you find care. Use our secure appointment request form and the team will contact you."
+    intent = "appointment" if any(word in lower for word in ("appointment", "book", "schedule")) else "general"
+    url = "/portal/appointments/request/" if is_patient else "/request-appointment/"
+    return JsonResponse({"reply": reply, "intent": intent, "appointment_url": url})

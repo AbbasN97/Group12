@@ -15,4 +15,5 @@ urlpatterns = [
     path("patient-resources/<slug:slug>/", views.resource_detail, name="resource_detail"),
     path("request-appointment/", views.request_appointment, name="request_appointment"),
     path("request-appointment/received/", views.request_thanks, name="request_thanks"),
+    path("ai/assistant/", views.assistant_chat, name="assistant_chat"),
 ]
